@@ -121,7 +121,21 @@ static queue_obj *g_process_queue;
 static DWORD g_tls = TLS_OUT_OF_INDEXES;
 static int g_inited;
 
-static const char *PLS_PATH = "C:\\users\\steamuser\\AppData\\Local\\Dungeons2\\PLS";
+static char g_pls_parent[MAX_PATH];
+static char g_pls_path[MAX_PATH];
+
+/* The prefix's own user directory: steamuser under Proton, crossover under CrossOver. */
+static const char *pls_path_str(void)
+{
+    char base[MAX_PATH];
+    DWORD n;
+    if (g_pls_path[0]) return g_pls_path;
+    n = GetEnvironmentVariableA("LOCALAPPDATA", base, sizeof base);
+    if (!n || n >= sizeof base) snprintf(base, sizeof base, "C:\\users\\steamuser\\AppData\\Local");
+    snprintf(g_pls_parent, sizeof g_pls_parent, "%s\\Dungeons2", base);
+    snprintf(g_pls_path, sizeof g_pls_path, "%s\\PLS", g_pls_parent);
+    return g_pls_path;
+}
 
 static void xlog(const char *fmt, ...)
 {
@@ -1262,19 +1276,20 @@ static HRESULT WINAPI pls_size(void *self, SIZE_T *pathSize)
 {
     (void)self;
     if (!pathSize) return E_POINTER_;
-    *pathSize = strlen(PLS_PATH) + 1;
+    *pathSize = strlen(pls_path_str()) + 1;
     return S_OK;
 }
 static HRESULT WINAPI pls_path(void *self, SIZE_T pathSize, char *path, SIZE_T *used)
 {
-    SIZE_T n = strlen(PLS_PATH) + 1;
+    const char *pls = pls_path_str();
+    SIZE_T n = strlen(pls) + 1;
     (void)self;
     log_once("XPersistentLocalStorageGetPath");
-    CreateDirectoryA("C:\\users\\steamuser\\AppData\\Local\\Dungeons2", NULL);
-    CreateDirectoryA(PLS_PATH, NULL);
+    CreateDirectoryA(g_pls_parent, NULL);
+    CreateDirectoryA(pls, NULL);
     if (used) *used = n;
     if (!path || pathSize < n) return E_INSUFFICIENT_;
-    memcpy(path, PLS_PATH, n);
+    memcpy(path, pls, n);
     return S_OK;
 }
 static HRESULT WINAPI pls_space(void *self, UINT64 *info)

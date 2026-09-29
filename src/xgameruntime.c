@@ -2192,9 +2192,29 @@ static BOOL WINAPI hook_read(void *request, void *buffer, DWORD cap, DWORD *read
     return ok;
 }
 
-static void patch_slot(HMODULE mod, unsigned rva, void *hook, void **saved)
+static void **winhttp_slot(HMODULE mod, const char *name)
 {
-    void **slot = (void **)((unsigned char *)mod + rva);
+    unsigned char *base = (unsigned char *)mod;
+    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
+    IMAGE_DATA_DIRECTORY *dir = &nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    IMAGE_IMPORT_DESCRIPTOR *imp;
+    if (!dir->VirtualAddress) return NULL;
+    for (imp = (IMAGE_IMPORT_DESCRIPTOR *)(base + dir->VirtualAddress); imp->Name; imp++) {
+        IMAGE_THUNK_DATA *names, *slots;
+        if (_stricmp((const char *)(base + imp->Name), "WINHTTP.dll")) continue;
+        names = (IMAGE_THUNK_DATA *)(base + (imp->OriginalFirstThunk ? imp->OriginalFirstThunk : imp->FirstThunk));
+        slots = (IMAGE_THUNK_DATA *)(base + imp->FirstThunk);
+        for (; names->u1.AddressOfData; names++, slots++) {
+            if (IMAGE_SNAP_BY_ORDINAL(names->u1.Ordinal)) continue;
+            if (!strcmp((const char *)((IMAGE_IMPORT_BY_NAME *)(base + names->u1.AddressOfData))->Name, name))
+                return (void **)&slots->u1.Function;
+        }
+    }
+    return NULL;
+}
+
+static void patch_slot(void **slot, void *hook, void **saved)
+{
     DWORD old;
     if (!VirtualProtect(slot, sizeof *slot, PAGE_READWRITE, &old)) return;
     *saved = *slot;
@@ -2204,16 +2224,30 @@ static void patch_slot(HMODULE mod, unsigned rva, void *hook, void **saved)
 static void hook_xcurl_winhttp(void)
 {
     HMODULE mod;
+    void **set_option, **connect, **open_request, **send, **recv, **query, **read;
     if (real_set_option) return;
     mod = GetModuleHandleW(L"XCurl.dll");
     if (!mod) return;
-    patch_slot(mod, 0x1f498, (void *)hook_set_option, (void **)&real_set_option);
-    patch_slot(mod, 0x1f480, (void *)hook_connect, (void **)&real_connect);
-    patch_slot(mod, 0x1f4b0, (void *)hook_open_request, (void **)&real_open_request);
-    patch_slot(mod, 0x1f4a0, (void *)hook_send, (void **)&real_send);
-    patch_slot(mod, 0x1f488, (void *)hook_recv, (void **)&real_recv);
-    memcpy(&real_query, (unsigned char *)mod + 0x1f4d0, sizeof real_query);
-    patch_slot(mod, 0x1f4e8, (void *)hook_read, (void **)&real_read);
+    /* By name rather than by RVA, so a game update that moves XCurl's IAT does not
+     * have these write over whatever sits at the old addresses. */
+    set_option = winhttp_slot(mod, "WinHttpSetOption");
+    connect = winhttp_slot(mod, "WinHttpConnect");
+    open_request = winhttp_slot(mod, "WinHttpOpenRequest");
+    send = winhttp_slot(mod, "WinHttpSendRequest");
+    recv = winhttp_slot(mod, "WinHttpReceiveResponse");
+    query = winhttp_slot(mod, "WinHttpQueryHeaders");
+    read = winhttp_slot(mod, "WinHttpReadData");
+    if (!set_option || !connect || !open_request || !send || !recv || !query || !read) {
+        xlog("XCurl.dll does not import the WinHTTP calls this expects; not hooking");
+        return;
+    }
+    real_query = *query;
+    patch_slot(set_option, (void *)hook_set_option, (void **)&real_set_option);
+    patch_slot(connect, (void *)hook_connect, (void **)&real_connect);
+    patch_slot(open_request, (void *)hook_open_request, (void **)&real_open_request);
+    patch_slot(send, (void *)hook_send, (void **)&real_send);
+    patch_slot(recv, (void *)hook_recv, (void **)&real_recv);
+    patch_slot(read, (void *)hook_read, (void **)&real_read);
     xlog("hooked XCurl WinHTTP");
 }
 

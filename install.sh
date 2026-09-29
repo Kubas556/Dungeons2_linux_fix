@@ -9,6 +9,20 @@ if [ ! -f "$DLL" ]; then
     exit 1
 fi
 
+# The DLL looks for xauth.py in ~/.local/share/dungeons2-compat.
+# If the repository was cloned elsewhere, link it there.
+COMPAT="$HOME/.local/share/dungeons2-compat"
+if [ "$(CDPATH= cd -- "$COMPAT" 2>/dev/null && pwd -P)" != "$(cd -- "$ROOT" && pwd -P)" ]; then
+    if [ -e "$COMPAT" ] || [ -L "$COMPAT" ]; then
+        echo "$COMPAT exists but is not this repository." >&2
+        echo "Clone the repo there, or remove that directory and run again." >&2
+        exit 1
+    fi
+    mkdir -p "$(dirname "$COMPAT")"
+    ln -s "$ROOT" "$COMPAT"
+    echo "Linked $COMPAT -> $ROOT"
+fi
+
 STEAM_ROOT=${STEAM_ROOT:-$HOME/.local/share/Steam}
 if [ ! -f "$STEAM_ROOT/steamapps/libraryfolders.vdf" ] && [ -f "$HOME/.steam/steam/steamapps/libraryfolders.vdf" ]; then
     STEAM_ROOT=$HOME/.steam/steam

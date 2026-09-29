@@ -1384,6 +1384,8 @@ static void compat_paths(void)
     char wine[400];
     size_t i, j;
     if (g_xauth_unix[0]) return;
+    /* Wine passes the host's HOME to Windows processes as WINE_HOST_HOME. */
+    if (!home || home[0] != '/') home = getenv("WINE_HOST_HOME");
     if (!home || home[0] != '/') {
         user = getenv("USER");
         if (!user || !user[0]) user = getenv("LOGNAME");

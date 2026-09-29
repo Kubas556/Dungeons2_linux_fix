@@ -37,6 +37,21 @@ Start the game from Steam. A window shows a code and opens <https://www.microsof
 
 The token file is `~/.local/share/dungeons2-compat/tokens.txt` (mode `0600`). Do not share it. When it expires, the next launch refreshes it or asks you to sign in again.
 
+## Microsoft account linking
+
+Linking a Microsoft account in the game settings can fail with a server error. PlayFab rejects the Xbox token this `main` build supplies.
+
+A fix is on [`cursor/playfab-account-linking`](https://github.com/Kubas556/Dungeons2_linux_fix/tree/cursor/playfab-account-linking). After a normal install:
+
+```sh
+cd ~/.local/share/dungeons2-compat
+git fetch origin
+git checkout cursor/playfab-account-linking
+./install.sh
+```
+
+Quit the game first. The next launch signs you in again so it can mint a PlayFab token.
+
 ## Rebuild
 
 The DLL already in `src/` is ready to install. To build it yourself you need a MinGW-w64 posix cross compiler:

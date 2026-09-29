@@ -8,6 +8,7 @@ import base64
 import json
 import os
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -153,7 +154,11 @@ def show_code(url, code):
     with open(CODE_PATH, "w", encoding="utf-8") as handle:
         handle.write(url + "\n" + code + "\n")
     env = desktop_env()
-    subprocess.Popen(["xdg-open", url], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    opener = "open" if sys.platform == "darwin" else "xdg-open"
+    try:
+        subprocess.Popen([opener, url], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        pass
     text = "Sign in with your Microsoft account.\n\nOpen %s\nCode: %s" % (url, code)
     if os.path.exists("/usr/bin/zenity"):
         subprocess.Popen(

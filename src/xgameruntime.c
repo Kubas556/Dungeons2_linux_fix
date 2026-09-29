@@ -2064,6 +2064,8 @@ typedef struct net_sec_info {
 #define WINHTTP_TLS13 0x2000u
 #define WINHTTP_OPT_PROTOCOLS 84u
 #define WINHTTP_OPT_IPV6_FAST_FALLBACK 140u
+#define WINHTTP_OPT_DECOMPRESSION 118u
+#define WINHTTP_ERR_INVALID_OPTION 12009u
 
 static BOOL (WINAPI *real_set_option)(void *, DWORD, void *, DWORD);
 static void *(WINAPI *real_connect)(void *, const WCHAR *, unsigned short, DWORD);
@@ -2094,6 +2096,7 @@ static void http_status_set(void *req, int code)
 static BOOL WINAPI hook_set_option(void *handle, DWORD option, void *buffer, DWORD length)
 {
     DWORD fixed;
+    BOOL ok;
     if (option == WINHTTP_OPT_IPV6_FAST_FALLBACK)
         return TRUE; /* wine returns 12009; XCurl treats that as fatal and never connects */
     if (option == WINHTTP_OPT_PROTOCOLS && buffer && length >= sizeof(DWORD)) {
@@ -2102,7 +2105,13 @@ static BOOL WINAPI hook_set_option(void *handle, DWORD option, void *buffer, DWO
             return real_set_option(handle, option, &fixed, sizeof fixed);
         }
     }
-    return real_set_option(handle, option, buffer, length);
+    ok = real_set_option(handle, option, buffer, length);
+    /* CrossOver's WinHTTP (Wine 11.0) has no decompression option either and fails it with
+     * 12009, and XCurl abandons the request. XCurl sends no Accept-Encoding of its own, so
+     * accepting it only means the reply arrives uncompressed. */
+    if (!ok && option == WINHTTP_OPT_DECOMPRESSION && GetLastError() == WINHTTP_ERR_INVALID_OPTION)
+        return TRUE;
+    return ok;
 }
 static void *WINAPI hook_connect(void *session, const WCHAR *host, unsigned short port, DWORD reserved)
 {

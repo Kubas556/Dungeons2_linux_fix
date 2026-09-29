@@ -1374,7 +1374,7 @@ static char g_compat_unix[360];
 static char g_token_z[420];
 static char g_code_z[420];
 static char g_err_z[420];
-static char g_auth_cmd[700];
+static char g_xauth_unix[420];
 
 static void compat_paths(void)
 {
@@ -1383,7 +1383,7 @@ static void compat_paths(void)
     char homebuf[240];
     char wine[400];
     size_t i, j;
-    if (g_auth_cmd[0]) return;
+    if (g_xauth_unix[0]) return;
     if (!home || home[0] != '/') {
         user = getenv("USER");
         if (!user || !user[0]) user = getenv("LOGNAME");
@@ -1404,9 +1404,7 @@ static void compat_paths(void)
     snprintf(g_token_z, sizeof g_token_z, "%s\\tokens.txt", wine);
     snprintf(g_code_z, sizeof g_code_z, "%s\\login-code.txt", wine);
     snprintf(g_err_z, sizeof g_err_z, "%s\\login-error.txt", wine);
-    snprintf(g_auth_cmd, sizeof g_auth_cmd,
-             "C:\\windows\\system32\\start.exe /unix /usr/bin/python3 %s/xauth.py",
-             g_compat_unix);
+    snprintf(g_xauth_unix, sizeof g_xauth_unix, "%s/xauth.py", g_compat_unix);
 }
 
 static int auth_read_file(void)
@@ -1459,23 +1457,26 @@ static DWORD WINAPI auth_prompt(void *unused)
 
 static int auth_ensure(void)
 {
-    STARTUPINFOA si;
-    PROCESS_INFORMATION pi;
+    char *argv[3];
+    LONG (WINAPI *spawn)(char *const *, int);
+    LONG status;
     int i, prompted = 0;
     compat_paths();
     if (auth_read_file()) return 1;
     DeleteFileA(g_err_z);
     DeleteFileA(g_code_z);
-    memset(&si, 0, sizeof si);
-    si.cb = sizeof si;
-    memset(&pi, 0, sizeof pi);
     xlog("starting Microsoft sign-in");
-    if (!CreateProcessA(NULL, g_auth_cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
-        xlog("login spawn failed %lu", (unsigned long)GetLastError());
+    /* start.exe /unix hands an extensionless Unix binary to ShellExecuteEx, which finds no
+     * association for it and puts up an error box; spawn it the way winebrowser does. */
+    argv[0] = (char *)"/usr/bin/python3";
+    argv[1] = g_xauth_unix;
+    argv[2] = NULL;
+    spawn = (void *)GetProcAddress(GetModuleHandleA("ntdll.dll"), "__wine_unix_spawnvp");
+    status = spawn ? spawn(argv, 0) : -1;
+    if (status) {
+        xlog("login spawn failed %#lx", (unsigned long)status);
         return 0;
     }
-    CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
     for (i = 0; i < 240; i++) {
         FILE *err;
         if (auth_read_file()) {

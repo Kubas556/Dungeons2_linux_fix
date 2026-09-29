@@ -1474,7 +1474,7 @@ static DWORD WINAPI auth_prompt(void *unused)
 
 static int auth_ensure(void)
 {
-    char *argv[3];
+    char *argv[6];
     LONG (WINAPI *spawn)(char *const *, int);
     LONG status;
     int i, prompted = 0;
@@ -1485,9 +1485,20 @@ static int auth_ensure(void)
     xlog("starting Microsoft sign-in");
     /* start.exe /unix hands an extensionless Unix binary to ShellExecuteEx, which finds no
      * association for it and puts up an error box; spawn it the way winebrowser does. */
-    argv[0] = (char *)"/usr/bin/python3";
-    argv[1] = g_xauth_unix;
-    argv[2] = NULL;
+    /* Wine runs under Rosetta on Apple silicon, so a universal binary it starts runs as x86_64,
+     * and /usr/bin/python3 then cannot load xcrun. arch starts the native slice first. */
+    if (GetFileAttributesA("Z:\\System\\Library\\CoreServices\\SystemVersion.plist") != INVALID_FILE_ATTRIBUTES) {
+        argv[0] = (char *)"/usr/bin/arch";
+        argv[1] = (char *)"-arm64";
+        argv[2] = (char *)"-x86_64";
+        argv[3] = (char *)"/usr/bin/python3";
+        argv[4] = g_xauth_unix;
+        argv[5] = NULL;
+    } else {
+        argv[0] = (char *)"/usr/bin/python3";
+        argv[1] = g_xauth_unix;
+        argv[2] = NULL;
+    }
     spawn = (void *)GetProcAddress(GetModuleHandleA("ntdll.dll"), "__wine_unix_spawnvp");
     status = spawn ? spawn(argv, 0) : -1;
     if (status) {

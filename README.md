@@ -64,3 +64,7 @@ x86_64-w64-mingw32-gcc-posix -shared -O2 -Wall -Wextra -o src/xgameruntime.dll s
 ## What the game gets
 
 The DLL answers the Gaming Services calls this title makes: task queues, a signed-in Xbox user (your real XUID and gamertag from the cache), title id, retail sandbox, persistent local storage, and the HTTPS security settings XCurl asks for before it connects. PlayFab login still uses the Steam session. The Microsoft token is returned only when the game asks for one.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).

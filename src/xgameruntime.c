@@ -121,7 +121,21 @@ static queue_obj *g_process_queue;
 static DWORD g_tls = TLS_OUT_OF_INDEXES;
 static int g_inited;
 
-static const char *PLS_PATH = "C:\\users\\steamuser\\AppData\\Local\\Dungeons2\\PLS";
+static char g_pls_parent[MAX_PATH];
+static char g_pls_path[MAX_PATH];
+
+/* The prefix's own user directory: steamuser under Proton, crossover under CrossOver. */
+static const char *pls_path_str(void)
+{
+    char base[MAX_PATH];
+    DWORD n;
+    if (g_pls_path[0]) return g_pls_path;
+    n = GetEnvironmentVariableA("LOCALAPPDATA", base, sizeof base);
+    if (!n || n >= sizeof base) snprintf(base, sizeof base, "C:\\users\\steamuser\\AppData\\Local");
+    snprintf(g_pls_parent, sizeof g_pls_parent, "%s\\Dungeons2", base);
+    snprintf(g_pls_path, sizeof g_pls_path, "%s\\PLS", g_pls_parent);
+    return g_pls_path;
+}
 
 static void xlog(const char *fmt, ...)
 {
@@ -1262,19 +1276,20 @@ static HRESULT WINAPI pls_size(void *self, SIZE_T *pathSize)
 {
     (void)self;
     if (!pathSize) return E_POINTER_;
-    *pathSize = strlen(PLS_PATH) + 1;
+    *pathSize = strlen(pls_path_str()) + 1;
     return S_OK;
 }
 static HRESULT WINAPI pls_path(void *self, SIZE_T pathSize, char *path, SIZE_T *used)
 {
-    SIZE_T n = strlen(PLS_PATH) + 1;
+    const char *pls = pls_path_str();
+    SIZE_T n = strlen(pls) + 1;
     (void)self;
     log_once("XPersistentLocalStorageGetPath");
-    CreateDirectoryA("C:\\users\\steamuser\\AppData\\Local\\Dungeons2", NULL);
-    CreateDirectoryA(PLS_PATH, NULL);
+    CreateDirectoryA(g_pls_parent, NULL);
+    CreateDirectoryA(pls, NULL);
     if (used) *used = n;
     if (!path || pathSize < n) return E_INSUFFICIENT_;
-    memcpy(path, PLS_PATH, n);
+    memcpy(path, pls, n);
     return S_OK;
 }
 static HRESULT WINAPI pls_space(void *self, UINT64 *info)
@@ -1374,7 +1389,7 @@ static char g_compat_unix[360];
 static char g_token_z[420];
 static char g_code_z[420];
 static char g_err_z[420];
-static char g_auth_cmd[700];
+static char g_xauth_unix[420];
 
 static void compat_paths(void)
 {
@@ -1383,7 +1398,9 @@ static void compat_paths(void)
     char homebuf[240];
     char wine[400];
     size_t i, j;
-    if (g_auth_cmd[0]) return;
+    if (g_xauth_unix[0]) return;
+    /* Wine passes the host's HOME to Windows processes as WINE_HOST_HOME. */
+    if (!home || home[0] != '/') home = getenv("WINE_HOST_HOME");
     if (!home || home[0] != '/') {
         user = getenv("USER");
         if (!user || !user[0]) user = getenv("LOGNAME");
@@ -1404,9 +1421,7 @@ static void compat_paths(void)
     snprintf(g_token_z, sizeof g_token_z, "%s\\tokens.txt", wine);
     snprintf(g_code_z, sizeof g_code_z, "%s\\login-code.txt", wine);
     snprintf(g_err_z, sizeof g_err_z, "%s\\login-error.txt", wine);
-    snprintf(g_auth_cmd, sizeof g_auth_cmd,
-             "C:\\windows\\system32\\start.exe /unix /usr/bin/python3 %s/xauth.py",
-             g_compat_unix);
+    snprintf(g_xauth_unix, sizeof g_xauth_unix, "%s/xauth.py", g_compat_unix);
 }
 
 static int auth_read_file(void)
@@ -1459,23 +1474,37 @@ static DWORD WINAPI auth_prompt(void *unused)
 
 static int auth_ensure(void)
 {
-    STARTUPINFOA si;
-    PROCESS_INFORMATION pi;
+    char *argv[6];
+    LONG (WINAPI *spawn)(char *const *, int);
+    LONG status;
     int i, prompted = 0;
     compat_paths();
     if (auth_read_file()) return 1;
     DeleteFileA(g_err_z);
     DeleteFileA(g_code_z);
-    memset(&si, 0, sizeof si);
-    si.cb = sizeof si;
-    memset(&pi, 0, sizeof pi);
     xlog("starting Microsoft sign-in");
-    if (!CreateProcessA(NULL, g_auth_cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
-        xlog("login spawn failed %lu", (unsigned long)GetLastError());
+    /* start.exe /unix hands an extensionless Unix binary to ShellExecuteEx, which finds no
+     * association for it and puts up an error box; spawn it the way winebrowser does. */
+    /* Wine runs under Rosetta on Apple silicon, so a universal binary it starts runs as x86_64,
+     * and /usr/bin/python3 then cannot load xcrun. arch starts the native slice first. */
+    if (GetFileAttributesA("Z:\\System\\Library\\CoreServices\\SystemVersion.plist") != INVALID_FILE_ATTRIBUTES) {
+        argv[0] = (char *)"/usr/bin/arch";
+        argv[1] = (char *)"-arm64";
+        argv[2] = (char *)"-x86_64";
+        argv[3] = (char *)"/usr/bin/python3";
+        argv[4] = g_xauth_unix;
+        argv[5] = NULL;
+    } else {
+        argv[0] = (char *)"/usr/bin/python3";
+        argv[1] = g_xauth_unix;
+        argv[2] = NULL;
+    }
+    spawn = (void *)GetProcAddress(GetModuleHandleA("ntdll.dll"), "__wine_unix_spawnvp");
+    status = spawn ? spawn(argv, 0) : -1;
+    if (status) {
+        xlog("login spawn failed %#lx", (unsigned long)status);
         return 0;
     }
-    CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
     for (i = 0; i < 240; i++) {
         FILE *err;
         if (auth_read_file()) {
@@ -2064,6 +2093,8 @@ typedef struct net_sec_info {
 #define WINHTTP_TLS13 0x2000u
 #define WINHTTP_OPT_PROTOCOLS 84u
 #define WINHTTP_OPT_IPV6_FAST_FALLBACK 140u
+#define WINHTTP_OPT_DECOMPRESSION 118u
+#define WINHTTP_ERR_INVALID_OPTION 12009u
 
 static BOOL (WINAPI *real_set_option)(void *, DWORD, void *, DWORD);
 static void *(WINAPI *real_connect)(void *, const WCHAR *, unsigned short, DWORD);
@@ -2094,6 +2125,7 @@ static void http_status_set(void *req, int code)
 static BOOL WINAPI hook_set_option(void *handle, DWORD option, void *buffer, DWORD length)
 {
     DWORD fixed;
+    BOOL ok;
     if (option == WINHTTP_OPT_IPV6_FAST_FALLBACK)
         return TRUE; /* wine returns 12009; XCurl treats that as fatal and never connects */
     if (option == WINHTTP_OPT_PROTOCOLS && buffer && length >= sizeof(DWORD)) {
@@ -2102,7 +2134,13 @@ static BOOL WINAPI hook_set_option(void *handle, DWORD option, void *buffer, DWO
             return real_set_option(handle, option, &fixed, sizeof fixed);
         }
     }
-    return real_set_option(handle, option, buffer, length);
+    ok = real_set_option(handle, option, buffer, length);
+    /* CrossOver's WinHTTP (Wine 11.0) has no decompression option either and fails it with
+     * 12009, and XCurl abandons the request. XCurl sends no Accept-Encoding of its own, so
+     * accepting it only means the reply arrives uncompressed. */
+    if (!ok && option == WINHTTP_OPT_DECOMPRESSION && GetLastError() == WINHTTP_ERR_INVALID_OPTION)
+        return TRUE;
+    return ok;
 }
 static void *WINAPI hook_connect(void *session, const WCHAR *host, unsigned short port, DWORD reserved)
 {
@@ -2165,9 +2203,29 @@ static BOOL WINAPI hook_read(void *request, void *buffer, DWORD cap, DWORD *read
     return ok;
 }
 
-static void patch_slot(HMODULE mod, unsigned rva, void *hook, void **saved)
+static void **winhttp_slot(HMODULE mod, const char *name)
 {
-    void **slot = (void **)((unsigned char *)mod + rva);
+    unsigned char *base = (unsigned char *)mod;
+    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
+    IMAGE_DATA_DIRECTORY *dir = &nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    IMAGE_IMPORT_DESCRIPTOR *imp;
+    if (!dir->VirtualAddress) return NULL;
+    for (imp = (IMAGE_IMPORT_DESCRIPTOR *)(base + dir->VirtualAddress); imp->Name; imp++) {
+        IMAGE_THUNK_DATA *names, *slots;
+        if (_stricmp((const char *)(base + imp->Name), "WINHTTP.dll")) continue;
+        names = (IMAGE_THUNK_DATA *)(base + (imp->OriginalFirstThunk ? imp->OriginalFirstThunk : imp->FirstThunk));
+        slots = (IMAGE_THUNK_DATA *)(base + imp->FirstThunk);
+        for (; names->u1.AddressOfData; names++, slots++) {
+            if (IMAGE_SNAP_BY_ORDINAL(names->u1.Ordinal)) continue;
+            if (!strcmp((const char *)((IMAGE_IMPORT_BY_NAME *)(base + names->u1.AddressOfData))->Name, name))
+                return (void **)&slots->u1.Function;
+        }
+    }
+    return NULL;
+}
+
+static void patch_slot(void **slot, void *hook, void **saved)
+{
     DWORD old;
     if (!VirtualProtect(slot, sizeof *slot, PAGE_READWRITE, &old)) return;
     *saved = *slot;
@@ -2177,16 +2235,30 @@ static void patch_slot(HMODULE mod, unsigned rva, void *hook, void **saved)
 static void hook_xcurl_winhttp(void)
 {
     HMODULE mod;
+    void **set_option, **connect, **open_request, **send, **recv, **query, **read;
     if (real_set_option) return;
     mod = GetModuleHandleW(L"XCurl.dll");
     if (!mod) return;
-    patch_slot(mod, 0x1f498, (void *)hook_set_option, (void **)&real_set_option);
-    patch_slot(mod, 0x1f480, (void *)hook_connect, (void **)&real_connect);
-    patch_slot(mod, 0x1f4b0, (void *)hook_open_request, (void **)&real_open_request);
-    patch_slot(mod, 0x1f4a0, (void *)hook_send, (void **)&real_send);
-    patch_slot(mod, 0x1f488, (void *)hook_recv, (void **)&real_recv);
-    memcpy(&real_query, (unsigned char *)mod + 0x1f4d0, sizeof real_query);
-    patch_slot(mod, 0x1f4e8, (void *)hook_read, (void **)&real_read);
+    /* By name rather than by RVA, so a game update that moves XCurl's IAT does not
+     * have these write over whatever sits at the old addresses. */
+    set_option = winhttp_slot(mod, "WinHttpSetOption");
+    connect = winhttp_slot(mod, "WinHttpConnect");
+    open_request = winhttp_slot(mod, "WinHttpOpenRequest");
+    send = winhttp_slot(mod, "WinHttpSendRequest");
+    recv = winhttp_slot(mod, "WinHttpReceiveResponse");
+    query = winhttp_slot(mod, "WinHttpQueryHeaders");
+    read = winhttp_slot(mod, "WinHttpReadData");
+    if (!set_option || !connect || !open_request || !send || !recv || !query || !read) {
+        xlog("XCurl.dll does not import the WinHTTP calls this expects; not hooking");
+        return;
+    }
+    real_query = *query;
+    patch_slot(set_option, (void *)hook_set_option, (void **)&real_set_option);
+    patch_slot(connect, (void *)hook_connect, (void **)&real_connect);
+    patch_slot(open_request, (void *)hook_open_request, (void **)&real_open_request);
+    patch_slot(send, (void *)hook_send, (void **)&real_send);
+    patch_slot(recv, (void *)hook_recv, (void **)&real_recv);
+    patch_slot(read, (void *)hook_read, (void **)&real_read);
     xlog("hooked XCurl WinHTTP");
 }
 

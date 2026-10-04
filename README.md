@@ -6,7 +6,7 @@ On first launch it signs you in with your own Microsoft account through the norm
 
 ## Install
 
-Proton and Python 3 are required. Clone this repository into the directory the DLL searches:
+Proton, Python 3, and OpenSSL are required. The `openssl` command has to be on `PATH`; sign-in uses it to mint the device-bound PlayFab token. Clone this repository into the directory the DLL searches:
 
 ```sh
 git clone git@github.com:Kubas556/Dungeons2_linux_fix.git ~/.local/share/dungeons2-compat
@@ -36,6 +36,12 @@ Quit the game completely before installing. A running process keeps the old DLL.
 Start the game from Steam. A window shows a code and opens <https://www.microsoft.com/link>. Enter the code, then sign in with the Microsoft account that should own the Xbox profile. Leave that page as `https://www.microsoft.com/link` with no extra query string.
 
 The token file is `~/.local/share/dungeons2-compat/tokens.txt` (mode `0600`). Do not share it. When it expires, the next launch refreshes it or asks you to sign in again.
+
+## Microsoft account linking
+
+Linking a Microsoft account in the game settings uses this same sign-in. The helper mints a device-bound PlayFab token, and the game receives that token when it talks to PlayFab. Nothing else has to be checked out.
+
+A `tokens.txt` saved before that token existed is renewed on the next launch.
 
 ## Rebuild
 

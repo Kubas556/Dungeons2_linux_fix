@@ -11,7 +11,7 @@ The same helper runs under CrossOver on macOS. See [macOS with CrossOver](#macos
 Proton, Python 3, and OpenSSL are required. The `openssl` command has to be on `PATH`; sign-in uses it to mint the device-bound PlayFab token. Clone this repository into the directory the DLL searches:
 
 ```sh
-git clone git@github.com:Kubas556/Dungeons2_linux_fix.git ~/.local/share/dungeons2-compat
+git clone https://github.com/Kubas556/Dungeons2_linux_fix.git ~/.local/share/dungeons2-compat
 cd ~/.local/share/dungeons2-compat
 chmod +x install.sh xauth.py
 ./install.sh
@@ -37,19 +37,18 @@ Quit the game completely before installing. A running process keeps the old DLL.
 
 CrossOver, `/usr/bin/python3`, and `openssl` on `PATH` are required. The DLL starts `/usr/bin/python3` directly, so a Homebrew Python is not enough. On Apple silicon it asks `arch` for the native slice first.
 
-`install.sh` only looks for a Linux Steam library. Clone the repository where the DLL searches, then copy the DLL yourself:
+`install.sh` only looks for a Linux Steam library. Quit the game, then:
 
 ```sh
-git clone git@github.com:Kubas556/Dungeons2_linux_fix.git ~/.local/share/dungeons2-compat
+git clone https://github.com/Kubas556/Dungeons2_linux_fix.git ~/.local/share/dungeons2-compat
+cd ~/.local/share/dungeons2-compat
+chmod +x install-macos.sh xauth.py
+./install-macos.sh
 ```
 
-Quit the game. In CrossOver, select the Steam bottle and choose Open C: Drive. Copy `src/xgameruntime.dll` to:
+`install-macos.sh` finds the CrossOver Steam bottle and copies `src/xgameruntime.dll` next to `Dungeons.exe`, next to `Dungeons-Win64-Shipping.exe`, and into the bottle's `drive_c/windows/system32`. It also sets `xgameruntime` to native in that bottle. If more than one bottle has the game, run it again with `CX_BOTTLE` set to the bottle name or path.
 
-- `Windows/System32`, at the top of that C: drive
-- the `Minecraft Dungeons II` folder in the bottle's Steam `steamapps/common`
-- `Minecraft Dungeons II/Dungeons/Binaries/Win64`
-
-In that bottle, open Wine Configuration, go to Libraries, and add `xgameruntime` as native. Sign-in is the same as below: CrossOver opens <https://www.microsoft.com/link> and shows the device code.
+Sign-in is the same as below: CrossOver opens <https://www.microsoft.com/link> and shows the device code.
 
 ## First sign-in
 
@@ -71,6 +70,8 @@ The DLL already in `src/` is ready to install. To build it yourself you need a M
 x86_64-w64-mingw32-gcc-posix -shared -O2 -Wall -Wextra -o src/xgameruntime.dll src/xgameruntime.c
 ./install.sh
 ```
+
+On macOS, run `./install-macos.sh` after that build.
 
 ## What the game gets
 

@@ -4,6 +4,8 @@ A local stand-in for Microsoft Gaming Services so Minecraft Dungeons II (Steam a
 
 On first launch it signs you in with your own Microsoft account through the normal device-code page at <https://www.microsoft.com/link>, then caches the Xbox token next to the helper. Later launches reuse that cache until it expires.
 
+The same helper runs under CrossOver on macOS. See [macOS with CrossOver](#macos-with-crossover).
+
 ## Install
 
 Proton, Python 3, and OpenSSL are required. The `openssl` command has to be on `PATH`; sign-in uses it to mint the device-bound PlayFab token. Clone this repository into the directory the DLL searches:
@@ -30,6 +32,24 @@ WINEDLLOVERRIDES="xgameruntime=n" %command%
 ```
 
 Quit the game completely before installing. A running process keeps the old DLL.
+
+## macOS with CrossOver
+
+CrossOver, `/usr/bin/python3`, and `openssl` on `PATH` are required. The DLL starts `/usr/bin/python3` directly, so a Homebrew Python is not enough. On Apple silicon it asks `arch` for the native slice first.
+
+`install.sh` only looks for a Linux Steam library. Clone the repository where the DLL searches, then copy the DLL yourself:
+
+```sh
+git clone git@github.com:Kubas556/Dungeons2_linux_fix.git ~/.local/share/dungeons2-compat
+```
+
+Quit the game. In CrossOver, select the Steam bottle and choose Open C: Drive. Copy `src/xgameruntime.dll` to:
+
+- `Windows/System32`, at the top of that C: drive
+- the `Minecraft Dungeons II` folder in the bottle's Steam `steamapps/common`
+- `Minecraft Dungeons II/Dungeons/Binaries/Win64`
+
+In that bottle, open Wine Configuration, go to Libraries, and add `xgameruntime` as native. Sign-in is the same as below: CrossOver opens <https://www.microsoft.com/link> and shows the device code.
 
 ## First sign-in
 
